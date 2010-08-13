@@ -1,0 +1,6 @@
+; $Id$
+name = Update Status Proxy
+description = Provides a means for retrieving module status updates via a proxy server
+dependencies[] = update
+package = Other
+core = 6.x

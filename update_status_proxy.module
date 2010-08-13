@@ -1,0 +1,214 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Update status proxy module file.
+ *
+ * Contains the implementation of the update status proxy module
+ * 
+ * @author Rob Knight <mail@robknight.org.uk>
+ */
+
+/**
+ * Implementation of hook_perm()
+ */
+function update_status_proxy_perm() {
+  return array ('administer update status proxy', 'retri');
+}
+
+/**
+ * Implementation of hook_menu()
+ */
+function update_status_proxy_menu() {
+  $items = array();
+  
+  $items['update-status-proxy'] = array(
+    'page callback' => 'update_status_proxy_get_updates',
+    'page arguments' => array(1, 2),
+    'type' => MENU_CALLBACK,
+    'access callback' => 'user_access',
+    'access arguments' => array('administer content')
+  );
+  
+  $items['admin/settings/update-status-proxy'] = array(
+    'title' => 'Update status proxy',
+    'description' => 'Configure querying of module update status via a proxy',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('update_status_proxy_admin_settings'),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer update status proxy'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'update_status_proxy.admin.inc',
+  );
+  
+  return $items;
+}
+
+/**
+ * Retrieve the updates via the proxy server
+ * 
+ * We begin by checking to see if a proxy server has been set - if not, simply redirect the
+ * client to the 'original' unproxied URL.
+ * 
+ * If we have a proxy, then we just carry out the update status request to the appropriate
+ * URL and return the headers and data to the client.
+ */
+function update_status_proxy_get_updates($module, $core_compat) {
+  
+  if ((variable_get('update_status_proxy_status', 0) == 0) || !$module || !$core_compat) {
+    drupal_not_found();
+    exit;
+  }
+  
+  $sitekey = $_GET['site_key'];
+  $version = $_GET['version'];
+  
+  $proxy_host = variable_get('update_status_proxy_proxy_host', '');
+  $proxy_port = variable_get('update_status_proxy_proxy_port', 8080);
+  $proxy_user = variable_get('update_status_proxy_proxy_user', '');
+  $proxy_pass = variable_get('update_status_proxy_proxy_pass', '');
+  $update_url = variable_get('update_status_proxy_update_url', UPDATE_DEFAULT_URL);
+  
+  if (drupal_strlen($proxy_host) > 0) {
+    
+    /**
+     * Some modules and themes have their own update URLs.  Retrieve the info about the
+     * project so that we can use the alternate URL.
+     */
+    $info = update_status_proxy_get_module_info($module);
+
+    // Does an alternate URL exist?
+    if (isset($info['_project status url'])) {
+      $update_url = $info['_project status url'];
+    }
+
+    $update_url_components = parse_url($update_url);
+    
+    // The path to pass to the proxy server
+    $path = $update_url_components['path'] . '/' . $module . '/' . $core_compat;
+    
+    // Stick any necessary query string values on the end
+    $path .= (strpos($path, '?') === TRUE) ? '&' : '?';
+    $path .= 'site_key=';
+    $path .= rawurlencode($site_key);
+    
+    if ($version) {
+      $path .= '&version=';
+      $path .= rawurlencode($version);
+    }
+    
+    // Include proxy authentication values if specified
+    if (drupal_strlen($proxy_user) && drupal_strlen($proxy_pass)) {
+      $auth = "{$proxy_user}:{$proxy_pass}@";
+    } else {
+      $auth = '';
+    }
+    
+    // URL to the proxy server
+    $url = "http://{$auth}{$proxy_host}:{$proxy_port}/" . $path;
+    
+    // We need to pass the 'host' header to the proxy server so it knows where to go
+    $headers = array(
+      'Host' => $update_url_components['host']
+    );
+    
+    $result = drupal_http_request($url, $headers);
+    
+    if ($result->headers) {
+      foreach ($result->headers as $header => $value) {
+        drupal_set_header("{$header}: {$value}");
+      }
+    }
+    
+    echo $result->data;
+    
+    exit;
+  } else {
+    // Get project info
+    $info = update_status_proxy_get_module_info($module);
+
+    // Does an alternate URL exist?
+    if (isset($info['_project status url'])) {
+      $update_url = $info['_project status url'];
+    }
+
+    $redirect = $update_url . '/' . $module . '/' . $core_compat;
+    
+      // Stick any necessary query string values on the end
+    $redirect .= (strpos($redirect, '?') === TRUE) ? '&' : '?';
+    $redirect .= 'site_key=';
+    $redirect .= rawurlencode($site_key);
+    
+    if ($version) {
+      $redirect .= '&version=';
+      $redirect .= rawurlencode($version);
+    }
+    
+    drupal_goto($redirect);
+    
+  }
+
+  
+}
+
+/**
+ * Really simply function to grab and unserialize the information about a module
+ * from the system table
+ * @param $module The module/theme name
+ */
+function update_status_proxy_get_module_info($module) {
+  $q = db_query("SELECT info FROM {system} WHERE name = '%s'", $module);
+  
+  return unserialize(db_result($q));
+}
+
+
+/**
+ * Implementation of hook_system_info_alter
+ * 
+ * Bit of magic goes on here.  When checking for updates, Drupal rebuilds the cache
+ * of information about each project by reading the .info files.  However, we have
+ * a problem with modules which specify their own 'project status url' - we can't
+ * tell Drupal's update module to come to us instead for these.  So we just 'hide' 
+ * these URLs by prepending a '_' character, so we can still read it but Drupal 
+ * can't, which means that Drupal will always try to access the proxy for updates.
+ * 
+ * @param $info Information about the project
+ * @param $file
+ */
+function update_status_proxy_system_info_alter(&$info, $file) {
+  if (isset($info['project status url'])) {
+    $url = $info['project status url'];
+    unset($info['project status url']);
+    $info['_project status url'] = $url;
+  }
+}
+
+/**
+ * Enable the update_status_proxy
+ */
+function update_status_proxy_enable($show_message = TRUE) {
+  
+  variable_set('update_status_proxy_status', 1);
+  // TODO: consider whether Strongarm integration makes more sense here
+  variable_set('update_fetch_url', url('update-status-proxy', array('absolute' => TRUE)));
+  
+  if ($show_message) {
+    drupal_set_message(t('Update Status Proxy enabled.'));
+  }
+}
+
+
+/**
+ * The reverse of the enable function above
+ */
+function update_status_proxy_disable($show_message = TRUE) {
+  
+  variable_set('update_status_proxy_status', 0);
+  variable_set('update_fetch_url', variable_get('update_status_proxy_update_url', UPDATE_DEFAULT_URL));
+  
+  if ($show_message) {
+    drupal_set_message(t('Update Status Proxy disabled.'));
+  }
+}

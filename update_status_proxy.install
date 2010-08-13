@@ -1,0 +1,34 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Update status proxy install file.
+ * 
+ * @author Rob Knight <mail@robknight.org.uk>
+ */
+
+
+/**
+ * Installation function
+ */
+function update_status_proxy_install() {
+  variable_set('update_status_proxy_enabled', 0);
+  drupal_set_message(t('Update Status Proxy installed.  To enable this module, please go to <a href="@url">the settings page</a>.',
+    array('%url' => url('admin/settings/update-status-proxy'))));
+}
+
+/**
+ * Uninstallation function
+ */
+function update_status_proxy_uninstall() {
+  update_status_proxy_disable(FALSE);
+  
+  variable_del('update_status_proxy_proxy_host');
+  variable_del('update_status_proxy_proxy_port');
+  variable_del('update_status_proxy_proxy_user');
+  variable_del('update_status_proxy_proxy_pass');
+  variable_del('update_status_proxy_update_url');
+  variable_del('update_status_proxy_proxy_enabled');
+  variable_del('update_status_proxy_proxy_status');
+}
