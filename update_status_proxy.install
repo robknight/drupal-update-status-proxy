@@ -15,7 +15,7 @@
 function update_status_proxy_install() {
   variable_set('update_status_proxy_enabled', 0);
   drupal_set_message(t('Update Status Proxy installed.  To enable this module, please go to <a href="@url">the settings page</a>.',
-    array('%url' => url('admin/settings/update-status-proxy'))));
+    array('@url' => url('admin/settings/update-status-proxy'))));
 }
 
 /**
